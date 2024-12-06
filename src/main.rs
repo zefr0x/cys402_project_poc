@@ -27,7 +27,7 @@ use tokio::{io::AsyncBufReadExt, sync::mpsc};
 use p2p::{AppBehaviourEvent, BlockRequest, BlockResponse, ChainResponse, LocalChainRequest};
 
 const DEGREE: usize = 8;
-const PLAINTEXT_MODULUS: u64 = 8;
+const PLAINTEXT_MODULUS: u64 = 4096;
 const MODULI: &[u64; 3] = &[0xffffee001, 0xffffc4001, 0x1ffffe0001];
 
 #[tokio::main]
@@ -50,11 +50,8 @@ async fn main() {
         .set_moduli(MODULI)
         .build_arc()
         .unwrap();
-    let crp = CommonRandomPoly::new(&params, &mut thread_rng()).unwrap();
 
     let secret_key = SecretKey::random(&params, &mut OsRng);
-    let public_key_share =
-        PublicKeyShare::new(&secret_key, crp.clone(), &mut thread_rng()).unwrap();
 
     // Networking
     let (chian_stream_response_sender, mut chain_stream_response_rcv) =
@@ -127,10 +124,13 @@ async fn main() {
 
     let local_peer_id = *swarm.local_peer_id();
 
-    tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        info!("sending init event");
-        init_sender.send(true).unwrap();
+    tokio::spawn({
+        let init_sender = init_sender.clone();
+        async move {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            info!("sending init event");
+            init_sender.send(true).unwrap();
+        }
     });
 
     loop {
@@ -143,7 +143,24 @@ async fn main() {
 
                     info!("connected nodes: {}", peers.len());
                     if peers.is_empty() {
-                        p2p::handle_create_block(bc::BlockData::PublicKeyShare(public_key_share.clone()), &mut swarm, &mut app, block_topic.clone());
+                        let crp = CommonRandomPoly::new(&params, &mut thread_rng()).unwrap();
+                        p2p::handle_create_block(bc::BlockData::CommonPoly(crp.clone()), &mut swarm, &mut app, block_topic.clone());
+                        if let Some(crp) = app
+                            .blocks
+                            .iter()
+                            .filter_map(|b| {
+                                if let BlockData::CommonPoly(s) = &b.data {
+                                    Some(s.clone())
+                                } else {
+                                    None
+                                }
+                            }).last() {
+                                let public_key_share =
+                                    PublicKeyShare::new(&secret_key, crp.clone(), &mut thread_rng()).unwrap();
+                                p2p::handle_create_block(bc::BlockData::PublicKeyShare(public_key_share.clone()), &mut swarm, &mut app, block_topic.clone());
+                            } else {
+                                error!("There is no common polynomial in the blockchain.")
+                            }
                     }
                     else {
                         let req = p2p::LocalChainRequest {
@@ -245,7 +262,6 @@ async fn main() {
                             let pt: Plaintext = deciper_shares.into_iter().aggregate().unwrap();
 
                             let tally_vec = Vec::<u64>::try_decode(&pt, Encoding::poly()).unwrap();
-                            dbg!(&tally_vec);
                             let tally_result = tally_vec[0];
 
                             println!("Result: {} out of {} are with", tally_result, number_of_shares);
@@ -339,7 +355,7 @@ async fn main() {
                 );
                 }
                 SwarmEvent::ConnectionEstablished {
-                peer_id, endpoint, ..
+                endpoint, ..
                 } => {
                     info!("Connected to {}", endpoint.get_remote_address());
                 }
@@ -417,7 +433,22 @@ async fn main() {
                             }
 
 
-                        p2p::handle_create_block(bc::BlockData::PublicKeyShare(public_key_share.clone()), &mut swarm,  &mut app, block_topic.clone());
+                        if let Some(crp) = app
+                            .blocks
+                            .iter()
+                            .filter_map(|b| {
+                                if let BlockData::CommonPoly(s) = &b.data {
+                                    Some(s.clone())
+                                } else {
+                                    None
+                                }
+                            }).last() {
+                                let public_key_share =
+                                    PublicKeyShare::new(&secret_key, crp.clone(), &mut thread_rng()).unwrap();
+                                p2p::handle_create_block(bc::BlockData::PublicKeyShare(public_key_share.clone()), &mut swarm, &mut app, block_topic.clone());
+                            } else {
+                                error!("There is no common polynomial in the blockchain.")
+                            }
                         }
                     } else if let Ok(block_request) =
                         bincode::decode_from_slice(&data, bincode::config::standard())

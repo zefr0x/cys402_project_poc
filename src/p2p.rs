@@ -7,7 +7,7 @@ use libp2p::{
 };
 use log::info;
 use serde::{Deserialize, Serialize};
-use std::{collections::hash_set::HashSet, io::Read};
+use std::collections::hash_set::HashSet;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
 pub struct ChainResponse {
@@ -84,7 +84,7 @@ pub fn handle_print_chain(app: &crate::bc::LocalChain) {
             block.timestamp,
             block.peer_id,
             block.nonce,
-            block.data.to_string(),
+            block.data,
             hex::encode(data_hash.to_vec()),
         );
     }

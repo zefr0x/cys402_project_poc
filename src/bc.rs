@@ -1,9 +1,9 @@
 use bincode::{Decode, Encode};
 use fhe::{
     bfv::{Ciphertext, PublicKey},
-    mbfv::{DecryptionShare, PublicKeyShare},
+    mbfv::{CommonRandomPoly, DecryptionShare, PublicKeyShare},
 };
-use log::{error, info, warn};
+use log::{info, warn};
 use serde::{Deserialize, Serialize};
 
 const DIFFICULTY_PREFIX: &str = "0";
@@ -31,25 +31,31 @@ pub fn calculate_hash(
 #[repr(u8)]
 pub enum BlockData {
     Genesis = 0,
-    PublicKeyShare(#[bincode(with_serde)] PublicKeyShare) = 1,
-    GlobalKey(#[bincode(with_serde)] PublicKey) = 2,
-    CipherShare(#[bincode(with_serde)] Ciphertext) = 3,
-    Tally(#[bincode(with_serde)] Ciphertext) = 4,
-    DecreptionShare(#[bincode(with_serde)] DecryptionShare) = 5,
-    Other(String) = 6,
+    CommonPoly(#[bincode(with_serde)] CommonRandomPoly) = 1,
+    PublicKeyShare(#[bincode(with_serde)] PublicKeyShare) = 2,
+    GlobalKey(#[bincode(with_serde)] PublicKey) = 3,
+    CipherShare(#[bincode(with_serde)] Ciphertext) = 4,
+    Tally(#[bincode(with_serde)] Ciphertext) = 5,
+    DecreptionShare(#[bincode(with_serde)] DecryptionShare) = 6,
+    Other(String) = 7,
 }
 
-impl ToString for BlockData {
-    fn to_string(&self) -> String {
-        match self {
-            Self::Genesis => "Genesis".to_owned(),
-            Self::PublicKeyShare(_) => "PublicKeyShare(...)".to_owned(),
-            Self::GlobalKey(_) => "GlobalKey(...)".to_owned(),
-            Self::CipherShare(_) => "CipherShare(...)".to_owned(),
-            Self::Tally(_) => "Tally(...)".to_owned(),
-            Self::DecreptionShare(_) => "DecreptionShare(...)".to_owned(),
-            Self::Other(s) => s.to_owned(),
-        }
+impl std::fmt::Display for BlockData {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Genesis => "Genesis".to_owned(),
+                Self::CommonPoly(_) => "CommonPoly(...)".to_owned(),
+                Self::PublicKeyShare(_) => "PublicKeyShare(...)".to_owned(),
+                Self::GlobalKey(_) => "GlobalKey(...)".to_owned(),
+                Self::CipherShare(_) => "CipherShare(...)".to_owned(),
+                Self::Tally(_) => "Tally(...)".to_owned(),
+                Self::DecreptionShare(_) => "DecreptionShare(...)".to_owned(),
+                Self::Other(s) => s.to_owned(),
+            }
+        )
     }
 }
 
@@ -96,7 +102,7 @@ impl Block {
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let (nonce, hash) = mine_block(id, now, &previous_hash, &peer_id, &data);
+        let (nonce, hash) = mine_block(id, now, &previous_hash, peer_id, &data);
         Self {
             id,
             hash,
@@ -133,17 +139,17 @@ impl LocalChain {
             previous_hash: String::from("genesis"),
             peer_id: "".to_owned(),
             data: BlockData::Genesis,
-            nonce: 20,
-            hash: "0025952822c1cf0de553d6d9a6f133ad".to_string(),
+            nonce: 1182,
+            hash: "0046149ca6817e7af76a04d2d03358e5".to_string(),
         };
 
-        dbg!(mine_block(
-            genesis_block.id,
-            genesis_block.timestamp,
-            &genesis_block.previous_hash,
-            &genesis_block.peer_id,
-            &genesis_block.data
-        ));
+        // dbg!(mine_block(
+        //     genesis_block.id,
+        //     genesis_block.timestamp,
+        //     &genesis_block.previous_hash,
+        //     &genesis_block.peer_id,
+        //     &genesis_block.data
+        // ));
 
         self.blocks.push(genesis_block);
     }

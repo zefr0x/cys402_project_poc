@@ -9,9 +9,8 @@ Pass the `--help` argument to list avialable options.
 Those commands can be passed to the program while running.
 - **ls**: List all the blocks in the blockchain
 - **lsp**: List connected peers
-- **create global**: To create global key after all nodes shared thier public key shares.
-- **vote**: Create your vote (every node must run ti).
-- **tally**: Calculate and partially decrept the result (every node must run it).
+- **vote**: Create your vote (every node must run it).
+- **decrypt**: Calculate and partially decrept the result (every node must run it).
 - **result**: Print the final result.
 
 > [!NOTE]
