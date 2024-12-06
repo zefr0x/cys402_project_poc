@@ -1,6 +1,7 @@
 mod bc;
 mod cli;
 mod p2p;
+mod utils;
 
 use std::sync::Arc;
 
@@ -138,7 +139,7 @@ async fn main() {
         tokio::select! {
             init = init_rcv.recv() => {
                 if init.is_some() {
-                    let peers = p2p::get_list_peers(&swarm);
+                    let peers = p2p::get_peers_list(&swarm);
                     app.genesis();
 
                     info!("connected nodes: {}", peers.len());
@@ -184,8 +185,8 @@ async fn main() {
             }
             Ok(Some(line)) = stdin.next_line() => {
                 match line.as_str() {
-                    "lsp" => p2p::handle_print_peers(&swarm),
-                    cmd if cmd.starts_with("ls") => p2p::handle_print_chain(&app),
+                    "lsp" => utils::handle_print_peers(&swarm),
+                    cmd if cmd.starts_with("ls") => utils::handle_print_chain(&app),
                     cmd if cmd.starts_with("vote") => {
                         if let Ok(global_key) = app
                             .blocks
@@ -232,10 +233,7 @@ async fn main() {
                                 sum += cipher;
                             }
 
-                            let data_bin = bincode::encode_to_vec(BlockData::Tally(sum.clone()), bincode::config::standard()).unwrap();
-                            let data_hash = md5::compute(&data_bin);
-                            info!("Global key hash: {}", hex::encode(data_hash.to_vec()));
-
+                            info!("Global key hash: {}", hex::encode(utils::hash(&BlockData::Tally(sum.clone()))));
 
                             let tally = Arc::new(sum);
 

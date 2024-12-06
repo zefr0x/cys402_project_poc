@@ -52,7 +52,7 @@ pub struct AppBehaviour {
     pub mdns: mdns::tokio::Behaviour,
 }
 
-pub fn get_list_peers(swarm: &Swarm<AppBehaviour>) -> Vec<PeerId> {
+pub fn get_peers_list(swarm: &Swarm<AppBehaviour>) -> Vec<PeerId> {
     info!("Discovered Peers:");
     let nodes = swarm.behaviour().mdns.discovered_nodes();
     let mut unique_peers = HashSet::new();
@@ -64,30 +64,6 @@ pub fn get_list_peers(swarm: &Swarm<AppBehaviour>) -> Vec<PeerId> {
         .iter()
         .map(|x| x.to_owned().to_owned())
         .collect()
-}
-
-pub fn handle_print_peers(swarm: &Swarm<AppBehaviour>) {
-    let peers = get_list_peers(swarm);
-    peers.iter().for_each(|p| println!("{}", p));
-}
-
-pub fn handle_print_chain(app: &crate::bc::LocalChain) {
-    for block in &app.blocks {
-        let data_bin =
-            bincode::encode_to_vec(block.data.clone(), bincode::config::standard()).unwrap();
-        let data_hash = md5::compute(&data_bin);
-        println!(
-            "id: {}\nhash: {}\nparent-hash: {}\ntimestamp: {}\npeer_id: {}\nnonce: {}\ndata: {}\ndata_hash: {}\n---",
-            block.id,
-            block.hash,
-            block.previous_hash,
-            block.timestamp,
-            block.peer_id,
-            block.nonce,
-            block.data,
-            hex::encode(data_hash.to_vec()),
-        );
-    }
 }
 
 pub fn handle_create_block(

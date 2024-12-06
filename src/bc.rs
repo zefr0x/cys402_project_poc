@@ -3,31 +3,11 @@ use fhe::{
     bfv::{Ciphertext, PublicKey},
     mbfv::{CommonRandomPoly, DecryptionShare, PublicKeyShare},
 };
-use log::{info, warn};
-use serde::{Deserialize, Serialize};
+use log::{error, info, warn};
 
-const DIFFICULTY_PREFIX: &str = "0";
+const DIFFICULTY_PREFIX: &[u8] = &[0];
 
-pub fn calculate_hash(
-    id: u64,
-    timestamp: u128,
-    previous_hash: &str,
-    peer_id: &str,
-    data: &BlockData,
-    nonce: u64,
-) -> Vec<u8> {
-    let data = serde_json::json!({
-        "id": id,
-        "previous_hash": previous_hash,
-        "peer_id": peer_id,
-        "data": data,
-        "timestamp": timestamp,
-        "nonce": nonce
-    });
-    md5::compute(data.to_string().as_bytes()).to_vec()
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Encode, Decode, PartialEq)]
+#[derive(Debug, Clone, Encode, Decode, PartialEq)]
 #[repr(u8)]
 pub enum BlockData {
     Genesis = 0,
@@ -59,7 +39,7 @@ impl std::fmt::Display for BlockData {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Encode, Decode)]
+#[derive(Debug, Clone, Encode, Decode)]
 pub struct Block {
     pub id: u64,
     pub hash: String,
@@ -70,26 +50,14 @@ pub struct Block {
     pub nonce: u64,
 }
 
-fn mine_block(
-    id: u64,
-    timestamp: u128,
-    previous_hash: &str,
-    peer_id: &str,
-    data: &BlockData,
-) -> (u64, String) {
+fn mine_block(data: &impl Encode) -> (u64, String) {
     info!("mining block...");
     let mut nonce = 0;
 
     loop {
-        let hash = calculate_hash(id, timestamp, previous_hash, peer_id, data, nonce);
-        let binary_hash = hash_to_binary_representation(&hash);
-        if binary_hash.starts_with(DIFFICULTY_PREFIX) {
-            info!(
-                "mined! nonce: {}, hash: {}, binary hash: {}",
-                nonce,
-                hex::encode(&hash),
-                binary_hash
-            );
+        let hash = crate::utils::hash(&(data, nonce));
+        if hash[0..DIFFICULTY_PREFIX.len()] == *DIFFICULTY_PREFIX {
+            info!("mined! nonce: {}, hash: {}", nonce, hex::encode(&hash));
             return (nonce, hex::encode(hash));
         }
         nonce += 1;
@@ -102,7 +70,7 @@ impl Block {
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let (nonce, hash) = mine_block(id, now, &previous_hash, peer_id, &data);
+        let (nonce, hash) = mine_block(&(id, now, &previous_hash, peer_id, &data));
         Self {
             id,
             hash,
@@ -113,14 +81,6 @@ impl Block {
             nonce,
         }
     }
-}
-
-fn hash_to_binary_representation(hash: &[u8]) -> String {
-    let mut res: String = String::default();
-    for c in hash {
-        res.push_str(&format!("{:b}", c));
-    }
-    res
 }
 
 pub struct LocalChain {
@@ -157,10 +117,10 @@ impl LocalChain {
     // FIX: Race condition when two nodes mine the exact same block.
     fn is_block_valid(&self, block: &Block, previous_block: &Block) -> bool {
         if block.previous_hash != previous_block.hash {
-            warn!("block with id: {} has wrong previous hash", block.id);
+            error!("block with id: {} has wrong previous hash", block.id);
             return false;
-        } else if !hash_to_binary_representation(&hex::decode(&block.hash).unwrap())
-            .starts_with(DIFFICULTY_PREFIX)
+        } else if hex::decode(&block.hash).unwrap()[0..DIFFICULTY_PREFIX.len()]
+            != *DIFFICULTY_PREFIX
         {
             warn!("block with id: {} has invalid difficulty", block.id);
             return false;
@@ -170,14 +130,14 @@ impl LocalChain {
                 block.id, previous_block.id
             );
             return false;
-        } else if hex::encode(calculate_hash(
+        } else if hex::encode(crate::utils::hash(&(
             block.id,
             block.timestamp,
             &block.previous_hash,
             &block.peer_id,
             &block.data,
             block.nonce,
-        )) != block.hash
+        ))) != block.hash
         {
             warn!("block with id: {} has invalid hash", block.id);
             return false;
