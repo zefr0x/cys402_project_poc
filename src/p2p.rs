@@ -7,7 +7,7 @@ use libp2p::{
 };
 use log::info;
 use serde::{Deserialize, Serialize};
-use std::collections::hash_set::HashSet;
+use std::{collections::hash_set::HashSet, io::Read};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
 pub struct ChainResponse {
@@ -73,14 +73,19 @@ pub fn handle_print_peers(swarm: &Swarm<AppBehaviour>) {
 
 pub fn handle_print_chain(app: &crate::bc::LocalChain) {
     for block in &app.blocks {
+        let data_bin =
+            bincode::encode_to_vec(block.data.clone(), bincode::config::standard()).unwrap();
+        let data_hash = md5::compute(&data_bin);
         println!(
-            "id: {}\nhash: {}\nparent-hash: {}\ntimestamp: {}\nnonce: {}\ndata: {}\n---",
+            "id: {}\nhash: {}\nparent-hash: {}\ntimestamp: {}\npeer_id: {}\nnonce: {}\ndata: {}\ndata_hash: {}\n---",
             block.id,
             block.hash,
             block.previous_hash,
             block.timestamp,
+            block.peer_id,
             block.nonce,
-            block.data.to_string()
+            block.data.to_string(),
+            hex::encode(data_hash.to_vec()),
         );
     }
 }
@@ -91,9 +96,15 @@ pub fn handle_create_block(
     app: &mut crate::bc::LocalChain,
     block_topic: Topic,
 ) {
+    let peer_id = swarm.local_peer_id().to_string();
     let behaviour = swarm.behaviour_mut();
     let latest_block = app.blocks.last().unwrap();
-    let block = crate::bc::Block::new(latest_block.id + 1, latest_block.hash.clone(), data);
+    let block = crate::bc::Block::new(
+        latest_block.id + 1,
+        latest_block.hash.clone(),
+        &peer_id,
+        data,
+    );
 
     let announce = NewBlockAnnounce { block_id: block.id };
 

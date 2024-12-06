@@ -22,13 +22,13 @@ pub fn build() -> clap::Command {
                 .long("vote-with")
                 .action(ArgAction::SetTrue)
                 .required(true)
-                .conflicts_with("vote-against")
+                .conflicts_with("vote-against"),
         )
         .arg(
             Arg::new("vote-against")
                 .long("vote-against")
                 .action(ArgAction::SetTrue)
                 .required(true)
-                .conflicts_with("vote-with")
+                .conflicts_with("vote-with"),
         )
 }

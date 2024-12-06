@@ -20,7 +20,7 @@ use libp2p::{
     swarm::SwarmEvent,
     tcp, yamux, PeerId, StreamProtocol, SwarmBuilder,
 };
-use log::{error, info};
+use log::{error, info, warn};
 use rand::{rngs::OsRng, thread_rng};
 use tokio::{io::AsyncBufReadExt, sync::mpsc};
 
@@ -169,58 +169,35 @@ async fn main() {
                 match line.as_str() {
                     "lsp" => p2p::handle_print_peers(&swarm),
                     cmd if cmd.starts_with("ls") => p2p::handle_print_chain(&app),
-                    cmd if cmd.starts_with("create global") => {
-                        if let None = app
-                            .blocks
-                            .iter()
-                            .filter_map(|b| {
-                                if let BlockData::PublicKey(s) = &b.data {
-                                    Some(s.clone())
-                                } else {
-                                    None
-                                }
-                            }
-                        ).last() {
-                            if let Ok(public_key) = app
-                                .blocks
-                                .iter()
-                                .filter_map(|b| {
-                                    if let BlockData::PublicKeyShare(s) = &b.data {
-                                        Some(s.clone())
-                                    } else {
-                                        None
-                                    }
-                                }).aggregate::<PublicKey>()
-                            {
-                                p2p::handle_create_block(bc::BlockData::PublicKey(public_key.clone()), &mut swarm,  &mut app, block_topic.clone());
-                            };
-                        };
-                    }
                     cmd if cmd.starts_with("vote") => {
-                        if let Some(public_key) = app
+                        if let Ok(global_key) = app
                             .blocks
                             .iter()
                             .filter_map(|b| {
-                                if let BlockData::PublicKey(s) = &b.data {
+                                if let BlockData::PublicKeyShare(s) = &b.data {
                                     Some(s.clone())
                                 } else {
                                     None
                                 }
-                            }
-                        ).last() {
+                            }).aggregate::<PublicKey>()
+                        {
+                            let data_bin = bincode::encode_to_vec(BlockData::GlobalKey(global_key.clone()), bincode::config::standard()).unwrap();
+                            let data_hash = md5::compute(&data_bin);
+                            info!("Global key hash: {}", hex::encode(data_hash.to_vec()));
+
                             let pt = if *vote_with {
                                 Plaintext::try_encode(&[1_u64], Encoding::poly(), &params).unwrap()
                             } else {
                                 Plaintext::try_encode(&[0_u64], Encoding::poly(), &params).unwrap()
                             };
-                            let ct = public_key.try_encrypt(&pt, &mut thread_rng()).unwrap();
+                            let ct = global_key.try_encrypt(&pt, &mut thread_rng()).unwrap();
 
                             p2p::handle_create_block(bc::BlockData::CipherShare(ct), &mut swarm,  &mut app, block_topic.clone());
-                        }
+                        } else {
+                            error!("There are no public key shares in the blockchain.");
+                        };
                     },
-                    cmd if cmd.starts_with("tally") => {
-                        let mut sum = Ciphertext::zero(&params);
-
+                    cmd if cmd.starts_with("decrypt") => {
                         let ciphers: Vec<Ciphertext> = app.blocks
                             .iter()
                             .filter_map(|b| {
@@ -232,16 +209,25 @@ async fn main() {
                         }).collect();
 
                         if !ciphers.is_empty() {
+                            let mut sum = Ciphertext::zero(&params);
+
                             for cipher in &ciphers {
                                 sum += cipher;
                             }
+
+                            let data_bin = bincode::encode_to_vec(BlockData::Tally(sum.clone()), bincode::config::standard()).unwrap();
+                            let data_hash = md5::compute(&data_bin);
+                            info!("Global key hash: {}", hex::encode(data_hash.to_vec()));
+
+
+                            let tally = Arc::new(sum);
+
+                            let sh = DecryptionShare::new(&secret_key, &tally, &mut thread_rng()).unwrap();
+
+                            p2p::handle_create_block(bc::BlockData::DecreptionShare(sh), &mut swarm,  &mut app, block_topic.clone());
+                        } else {
+                            warn!("There are no votes in the blockchain!");
                         }
-
-                        let sum = Arc::new(sum);
-
-                        let sh = DecryptionShare::new(&secret_key, &sum, &mut thread_rng()).unwrap();
-
-                        p2p::handle_create_block(bc::BlockData::DecreptionShare(sh), &mut swarm,  &mut app, block_topic.clone());
                     }
                     cmd if cmd.starts_with("result") => {
                         let deciper_shares: Vec<DecryptionShare> = app.blocks
@@ -255,12 +241,17 @@ async fn main() {
                         }).collect();
                         let number_of_shares = deciper_shares.len();
 
-                        let pt: Plaintext = deciper_shares.into_iter().aggregate().unwrap();
+                        if number_of_shares != 0 {
+                            let pt: Plaintext = deciper_shares.into_iter().aggregate().unwrap();
 
-                        let tally_vec = Vec::<u64>::try_decode(&pt, Encoding::poly()).unwrap();
-                        let tally_result = tally_vec[0];
+                            let tally_vec = Vec::<u64>::try_decode(&pt, Encoding::poly()).unwrap();
+                            dbg!(&tally_vec);
+                            let tally_result = tally_vec[0];
 
-                        info!("Result: {} out of {} are with", tally_result, number_of_shares);
+                            println!("Result: {} out of {} are with", tally_result, number_of_shares);
+                        } else {
+                            warn!("There are no decreption shares on the blockchain!");
+                        }
                     }
                     cmd if cmd.starts_with("write") => {
                         p2p::handle_create_block(bc::BlockData::Other(cmd.to_owned()), &mut swarm, &mut app, block_topic.clone())

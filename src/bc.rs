@@ -1,20 +1,25 @@
 use bincode::{Decode, Encode};
-use fhe::{bfv::{Ciphertext, PublicKey}, mbfv::{DecryptionShare, PublicKeyShare}};
+use fhe::{
+    bfv::{Ciphertext, PublicKey},
+    mbfv::{DecryptionShare, PublicKeyShare},
+};
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 
 const DIFFICULTY_PREFIX: &str = "0";
 
-fn calculate_hash(
+pub fn calculate_hash(
     id: u64,
     timestamp: u128,
     previous_hash: &str,
+    peer_id: &str,
     data: &BlockData,
     nonce: u64,
 ) -> Vec<u8> {
     let data = serde_json::json!({
         "id": id,
         "previous_hash": previous_hash,
+        "peer_id": peer_id,
         "data": data,
         "timestamp": timestamp,
         "nonce": nonce
@@ -22,15 +27,16 @@ fn calculate_hash(
     md5::compute(data.to_string().as_bytes()).to_vec()
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Encode, Decode,PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Encode, Decode, PartialEq)]
 #[repr(u8)]
 pub enum BlockData {
     Genesis = 0,
     PublicKeyShare(#[bincode(with_serde)] PublicKeyShare) = 1,
-    PublicKey(#[bincode(with_serde)] PublicKey) = 2,
+    GlobalKey(#[bincode(with_serde)] PublicKey) = 2,
     CipherShare(#[bincode(with_serde)] Ciphertext) = 3,
-    DecreptionShare(#[bincode(with_serde)] DecryptionShare) = 4,
-    Other(String) = 5,
+    Tally(#[bincode(with_serde)] Ciphertext) = 4,
+    DecreptionShare(#[bincode(with_serde)] DecryptionShare) = 5,
+    Other(String) = 6,
 }
 
 impl ToString for BlockData {
@@ -38,8 +44,9 @@ impl ToString for BlockData {
         match self {
             Self::Genesis => "Genesis".to_owned(),
             Self::PublicKeyShare(_) => "PublicKeyShare(...)".to_owned(),
-            Self::PublicKey(_) => "PublicKey(...)".to_owned(),
+            Self::GlobalKey(_) => "GlobalKey(...)".to_owned(),
             Self::CipherShare(_) => "CipherShare(...)".to_owned(),
+            Self::Tally(_) => "Tally(...)".to_owned(),
             Self::DecreptionShare(_) => "DecreptionShare(...)".to_owned(),
             Self::Other(s) => s.to_owned(),
         }
@@ -51,17 +58,24 @@ pub struct Block {
     pub id: u64,
     pub hash: String,
     pub previous_hash: String,
+    pub peer_id: String,
     pub timestamp: u128,
     pub data: BlockData,
     pub nonce: u64,
 }
 
-fn mine_block(id: u64, timestamp: u128, previous_hash: &str, data: &BlockData) -> (u64, String) {
+fn mine_block(
+    id: u64,
+    timestamp: u128,
+    previous_hash: &str,
+    peer_id: &str,
+    data: &BlockData,
+) -> (u64, String) {
     info!("mining block...");
     let mut nonce = 0;
 
     loop {
-        let hash = calculate_hash(id, timestamp, previous_hash, data, nonce);
+        let hash = calculate_hash(id, timestamp, previous_hash, peer_id, data, nonce);
         let binary_hash = hash_to_binary_representation(&hash);
         if binary_hash.starts_with(DIFFICULTY_PREFIX) {
             info!(
@@ -77,15 +91,16 @@ fn mine_block(id: u64, timestamp: u128, previous_hash: &str, data: &BlockData) -
 }
 
 impl Block {
-    pub fn new(id: u64, previous_hash: String, data: BlockData) -> Self {
+    pub fn new(id: u64, previous_hash: String, peer_id: &str, data: BlockData) -> Self {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let (nonce, hash) = mine_block(id, now, &previous_hash, &data);
+        let (nonce, hash) = mine_block(id, now, &previous_hash, &peer_id, &data);
         Self {
             id,
             hash,
+            peer_id: peer_id.to_owned(),
             timestamp: now,
             previous_hash,
             data,
@@ -116,12 +131,19 @@ impl LocalChain {
             id: 0,
             timestamp: 1733239982214461380,
             previous_hash: String::from("genesis"),
+            peer_id: "".to_owned(),
             data: BlockData::Genesis,
             nonce: 20,
             hash: "0025952822c1cf0de553d6d9a6f133ad".to_string(),
         };
 
-        // dbg!(mine_block(genesis_block.id, genesis_block.timestamp, &genesis_block.previous_hash, &genesis_block.data));
+        dbg!(mine_block(
+            genesis_block.id,
+            genesis_block.timestamp,
+            &genesis_block.previous_hash,
+            &genesis_block.peer_id,
+            &genesis_block.data
+        ));
 
         self.blocks.push(genesis_block);
     }
@@ -131,10 +153,8 @@ impl LocalChain {
         if block.previous_hash != previous_block.hash {
             warn!("block with id: {} has wrong previous hash", block.id);
             return false;
-        } else if !hash_to_binary_representation(
-            &hex::decode(&block.hash).unwrap(),
-        )
-        .starts_with(DIFFICULTY_PREFIX)
+        } else if !hash_to_binary_representation(&hex::decode(&block.hash).unwrap())
+            .starts_with(DIFFICULTY_PREFIX)
         {
             warn!("block with id: {} has invalid difficulty", block.id);
             return false;
@@ -148,6 +168,7 @@ impl LocalChain {
             block.id,
             block.timestamp,
             &block.previous_hash,
+            &block.peer_id,
             &block.data,
             block.nonce,
         )) != block.hash
