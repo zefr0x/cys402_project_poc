@@ -604,7 +604,6 @@ dependencies = [
  "pretty_env_logger",
  "rand 0.8.5",
  "serde",
- "sha2",
  "tokio",
  "zstd",
 ]
